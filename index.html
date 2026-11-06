@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rental Lead Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #14161a; color: #e8e6e1; display: flex; height: 100vh; }
+  #sidebar { width: 360px; min-width: 320px; display: flex; flex-direction: column; background: #1b1e24; border-right: 1px solid #2c3038; }
+  header { padding: 16px 18px 10px; }
+  header h1 { font-size: 20px; font-weight: 700; }
+  header p { font-size: 13px; color: #a7a49c; margin-top: 4px; line-height: 1.45; }
+  .legend { display: flex; gap: 8px; padding: 10px 18px; flex-wrap: wrap; }
+  .chip { border: 1px solid #3a3f49; background: #23262e; color: #e8e6e1; border-radius: 999px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+  .chip.active { border-color: #c9a86a; background: #2b2c26; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; border: 1.5px solid #fff3; }
+  .dot.waiting { background: #16171a; border-color: #8b8b8b; }
+  .dot.considering { background: #e3b93c; }
+  .dot.strong { background: #3f9e4d; }
+  #addBtn { margin: 4px 18px 12px; padding: 10px; border: none; border-radius: 8px; background: #c9a86a; color: #191919; font-weight: 700; font-size: 14px; cursor: pointer; }
+  #addBtn:hover { background: #dbbc7c; }
+  #list { overflow-y: auto; flex: 1; padding: 0 12px 16px; }
+  .card { background: #23262e; border: 1px solid #31363f; border-left: 5px solid #16171a; border-radius: 10px; padding: 12px 14px; margin: 10px 6px; cursor: pointer; }
+  .card.considering { border-left-color: #e3b93c; }
+  .card.strong { border-left-color: #3f9e4d; }
+  .card h3 { font-size: 15px; margin-bottom: 2px; }
+  .card .rent { color: #c9a86a; font-weight: 700; font-size: 14px; }
+  .card .meta { font-size: 12.5px; color: #b9b6ae; margin-top: 3px; line-height: 1.5; }
+  .card .notes { font-size: 12.5px; color: #d8d5cd; margin-top: 6px; line-height: 1.5; }
+  .card .row { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+  .card button, .popupbox button { border: 1px solid #3a3f49; background: #2c3038; color: #e8e6e1; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .card button:hover, .popupbox button:hover { background: #383d47; }
+  .card button.danger, .popupbox button.danger { border-color: #7a3535; color: #f0a3a3; }
+  #map { flex: 1; }
+  .pin { border-radius: 50%; border: 2px solid #fff; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 700; box-shadow: 0 1px 5px #0009; }
+  .pin.waiting { background: #16171a; }
+  .pin.considering { background: #e3b93c; color: #191919; }
+  .pin.strong { background: #3f9e4d; }
+  dialog { background: #23262e; color: #e8e6e1; border: 1px solid #3a3f49; border-radius: 12px; padding: 22px; width: min(430px, 92vw); }
+  dialog::backdrop { background: #000a; }
+  dialog h2 { font-size: 17px; margin-bottom: 14px; }
+  dialog label { display: block; font-size: 12.5px; color: #b9b6ae; margin: 10px 0 4px; }
+  dialog input, dialog select, dialog textarea { width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid #3a3f49; background: #191c21; color: #e8e6e1; font-size: 14px; }
+  dialog textarea { min-height: 64px; resize: vertical; }
+  .dialogrow { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; }
+  .dialogrow .save { background: #c9a86a; color: #191919; border: none; font-weight: 700; padding: 9px 16px; border-radius: 8px; cursor: pointer; }
+  .dialogrow .cancel { background: transparent; border: 1px solid #3a3f49; color: #e8e6e1; padding: 9px 16px; border-radius: 8px; cursor: pointer; }
+  .popupbox { font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; line-height: 1.5; min-width: 190px; }
+  .popupbox b { font-size: 14px; }
+  .empty { text-align: center; color: #a7a49c; font-size: 13.5px; padding: 30px 20px; line-height: 1.6; }
+  @media (max-width: 760px) { body { flex-direction: column; } #sidebar { width: 100%; height: 46%; } #map { height: 54%; } }
+</style>
+</head>
+<body>
+<aside id="sidebar">
+  <header>
+    <h1>🗺️ Rental Lead Map</h1>
+    <p>Track every rental you have contacted and where it stands. Click a card or a pin to jump to it. Data is saved in your browser only.</p>
+  </header>
+  <div class="legend" id="filters">
+    <button class="chip active" data-filter="all">All</button>
+    <button class="chip" data-filter="waiting"><span class="dot waiting"></span>Waiting on reply</button>
+    <button class="chip" data-filter="considering"><span class="dot considering"></span>Considering</button>
+    <button class="chip" data-filter="strong"><span class="dot strong"></span>Strong lead</button>
+  </div>
+  <button id="addBtn">+ Add a rental</button>
+  <div id="list"></div>
+</aside>
+<main id="map"></main>
+
+<dialog id="editor">
+  <form method="dialog" id="editForm">
+    <h2 id="editorTitle">Add a rental</h2>
+    <input type="hidden" id="f-id">
+    <label>Address</label>
+    <input id="f-address" required placeholder="123 Main St">
+    <label>City</label>
+    <input id="f-city" placeholder="Springfield">
+    <label>State</label>
+    <input id="f-state" placeholder="PA">
+    <label>Monthly rent ($)</label>
+    <input id="f-rent" type="number" min="0" step="1" placeholder="850">
+    <label>Status</label>
+    <select id="f-status">
+      <option value="waiting">⚫ Waiting on reply</option>
+      <option value="considering">🟡 Considering</option>
+      <option value="strong">🟢 Strong lead</option>
+    </select>
+    <label>Contact (name / phone)</label>
+    <input id="f-contact" placeholder="Landlord name, (555) 123-4567">
+    <label>Pet policy / answer</label>
+    <input id="f-pets" placeholder="Pets allowed? Fees? Not answered yet?">
+    <label>Notes</label>
+    <textarea id="f-notes" placeholder="Lease terms, deposit, next step..."></textarea>
+    <div class="dialogrow">
+      <button type="button" class="cancel" id="cancelBtn">Cancel</button>
+      <button type="submit" class="save">Save rental</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const KEY = "rental-lead-map-v1";
+const STATUS_ORDER = { strong: 0, considering: 1, waiting: 2 };
+const STATUS_LABEL = { waiting: "Waiting on reply", considering: "Considering", strong: "Strong lead" };
+
+let rentals = load();
+let filter = "all";
+let markers = {};
+
+const map = L.map("map").setView([41.6, -76.2], 8);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return [
+    { id: Date.now() - 2000, address: "123 Sample Street", city: "Example Town", state: "PA", rent: 850, status: "waiting",
+      contact: "Sample Landlord, (555) 010-1234", pets: "Pet question sent, no answer yet.", notes: "Demo entry. Delete it and add your own rentals.", lat: 41.75, lng: -76.4 },
+    { id: Date.now() - 1000, address: "45 Demo Avenue", city: "Sample City", state: "NY", rent: 975, status: "strong",
+      contact: "Demo Property Co., (555) 010-9876", pets: "All pets welcome.", notes: "Demo entry showing a strong lead.", lat: 42.05, lng: -75.9 }
+  ];
+}
+function save() { localStorage.setItem(KEY, JSON.stringify(rentals)); }
+
+function iconFor(r, n) {
+  return L.divIcon({ className: "", html: '<div class="pin ' + r.status + '">' + n + "</div>", iconSize: [22, 22], iconAnchor: [11, 11] });
+}
+
+function render() {
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+  const sorted = [...rentals].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.rent || 0) - (b.rent || 0));
+  const visible = sorted.filter(r => filter === "all" || r.status === filter);
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  if (!visible.length) {
+    list.innerHTML = '<div class="empty">No rentals here yet.<br>Add one with the button above.</div>';
+  }
+  visible.forEach((r, i) => {
+    const n = i + 1;
+    if (r.lat && r.lng) {
+      const m = L.marker([r.lat, r.lng], { icon: iconFor(r, n) }).addTo(map);
+      m.bindPopup('<div class="popupbox"><b>' + esc(r.address) + "</b><br>" +
+        esc([r.city, r.state].filter(Boolean).join(", ")) + "<br>" +
+        (r.rent ? "<b>$" + r.rent + "/mo</b> · " : "") + STATUS_LABEL[r.status] + "<br>" +
+        (r.pets ? "Pets: " + esc(r.pets) + "<br>" : "") +
+        (r.contact ? "Contact: " + esc(r.contact) : "") + "</div>");
+      markers[r.id] = m;
+    }
+    const card = document.createElement("div");
+    card.className = "card " + r.status;
+    card.innerHTML = "<h3>" + n + ". " + esc(r.address) + "</h3>" +
+      '<div><span class="rent">' + (r.rent ? "$" + r.rent + "/mo" : "Rent n/a") + "</span> · " +
+      esc([r.city, r.state].filter(Boolean).join(", ")) + " · " + STATUS_LABEL[r.status] + "</div>" +
+      (r.pets ? '<div class="meta">Pets: ' + esc(r.pets) + "</div>" : "") +
+      (r.contact ? '<div class="meta">Contact: ' + esc(r.contact) + "</div>" : "") +
+      (r.notes ? '<div class="notes">' + esc(r.notes) + "</div>" : "") +
+      '<div class="row">' +
+      '<button data-act="focus">Find on map</button>' +
+      '<button data-act="cycle">Change status</button>' +
+      '<button data-act="edit">Edit</button>' +
+      '<button data-act="del" class="danger">Delete (dead end)</button></div>';
+    card.querySelector('[data-act="focus"]').onclick = ev => { ev.stopPropagation(); focusRental(r); };
+    card.querySelector('[data-act="cycle"]').onclick = ev => { ev.stopPropagation(); cycleStatus(r); };
+    card.querySelector('[data-act="edit"]').onclick = ev => { ev.stopPropagation(); openEditor(r); };
+    card.querySelector('[data-act="del"]').onclick = ev => { ev.stopPropagation(); removeRental(r); };
+    card.onclick = () => focusRental(r);
+    list.appendChild(card);
+  });
+}
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+function focusRental(r) { if (r.lat && r.lng) { map.setView([r.lat, r.lng], 13); if (markers[r.id]) markers[r.id].openPopup(); } }
+function cycleStatus(r) {
+  r.status = r.status === "waiting" ? "considering" : r.status === "considering" ? "strong" : "waiting";
+  save(); render();
+}
+function removeRental(r) {
+  if (!confirm("Delete " + r.address + "? Dead ends come off the map for good.")) return;
+  rentals = rentals.filter(x => x.id !== r.id); save(); render();
+}
+
+async function geocode(r) {
+  const q = [r.address, r.city, r.state].filter(Boolean).join(", ");
+  try {
+    const res = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q));
+    const data = await res.json();
+    if (data && data.length) { r.lat = parseFloat(data[0].lat); r.lng = parseFloat(data[0].lon); save(); render(); }
+  } catch (e) {}
+}
+
+const dialog = document.getElementById("editor");
+function openEditor(r) {
+  document.getElementById("editorTitle").textContent = r ? "Edit rental" : "Add a rental";
+  document.getElementById("f-id").value = r ? r.id : "";
+  document.getElementById("f-address").value = r ? r.address : "";
+  document.getElementById("f-city").value = r ? r.city : "";
+  document.getElementById("f-state").value = r ? r.state : "";
+  document.getElementById("f-rent").value = r && r.rent ? r.rent : "";
+  document.getElementById("f-status").value = r ? r.status : "waiting";
+  document.getElementById("f-contact").value = r ? r.contact : "";
+  document.getElementById("f-pets").value = r ? r.pets : "";
+  document.getElementById("f-notes").value = r ? r.notes : "";
+  dialog.showModal();
+}
+document.getElementById("addBtn").onclick = () => openEditor(null);
+document.getElementById("cancelBtn").onclick = () => dialog.close();
+document.getElementById("editForm").addEventListener("submit", ev => {
+  ev.preventDefault();
+  const id = document.getElementById("f-id").value;
+  const data = {
+    address: document.getElementById("f-address").value.trim(),
+    city: document.getElementById("f-city").value.trim(),
+    state: document.getElementById("f-state").value.trim(),
+    rent: parseInt(document.getElementById("f-rent").value, 10) || null,
+    status: document.getElementById("f-status").value,
+    contact: document.getElementById("f-contact").value.trim(),
+    pets: document.getElementById("f-pets").value.trim(),
+    notes: document.getElementById("f-notes").value.trim()
+  };
+  if (id) {
+    const r = rentals.find(x => String(x.id) === String(id));
+    const moved = r.address !== data.address || r.city !== data.city || r.state !== data.state;
+    Object.assign(r, data);
+    if (moved) { r.lat = null; r.lng = null; geocode(r); }
+    save(); render();
+  } else {
+    const r = Object.assign({ id: Date.now(), lat: null, lng: null }, data);
+    rentals.push(r); save(); render(); geocode(r);
+  }
+  dialog.close();
+});
+
+document.getElementById("filters").addEventListener("click", ev => {
+  const btn = ev.target.closest("[data-filter]");
+  if (!btn) return;
+  filter = btn.dataset.filter;
+  document.querySelectorAll("#filters .chip").forEach(c => c.classList.toggle("active", c === btn));
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
